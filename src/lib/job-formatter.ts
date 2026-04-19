@@ -1,6 +1,23 @@
 import { JobItem } from "@/types/job";
 import { extractJobDetails, analyzeJobDescription } from "./job-analyzer";
 import { createTrackingUrl } from "./tracking-url";
+import { JobMetadataExtractor } from "./job-metadata-extractor";
+import { LocationExtractor } from "./location-extractor";
+import { softwareKeywords } from "./dictionaries/software";
+import { programmingKeywords } from "./dictionaries/programming-languages";
+
+/**
+ * Extracts the main domain name from a URL
+ * e.g. "https://www.linkedin.com/jobs/view/123" → "linkedin.com"
+ */
+function extractSourceDomain(url: string): string {
+  try {
+    const { hostname } = new URL(url);
+    return hostname.replace(/^www\./, '');
+  } catch {
+    return url;
+  }
+}
 
 /**
  * Calculates time elapsed since job posting
@@ -48,9 +65,57 @@ function formatDate(date: Date): string {
  */
 export function formatJobMessage(job: JobItem): string {
   const details = extractJobDetails(job.title);
-  const analysis = analyzeJobDescription(job.description);
   const postDate = new Date(job.pubDate);
   const timeAgo = getTimeAgo(postDate);
+
+  // Comprehensive metadata extraction (same modules as stats project)
+  const metadata = JobMetadataExtractor.extractAllMetadata({
+    title: details.position,
+    company: details.company !== 'N/A' ? details.company : (job.company || ''),
+    description: job.description,
+    url: job.link,
+  });
+
+  // Structured location extraction with country/city breakdown
+  const rawLocation = details.location !== 'N/A' ? details.location : (job.location || '');
+  const locationData = LocationExtractor.extractLocation(
+    rawLocation,
+    job.link,
+    job.title,
+    job.description,
+  );
+  const locationDisplay = rawLocation || LocationExtractor.formatLocation(locationData) || 'N/A';
+
+  // Experience, key skills, academic degrees, and role type from job analyzer
+  const analysis = analyzeJobDescription(job.description);
+
+  // Validate yearsExperience — discard unrealistically large values (>15 years)
+  let validatedExperience: string | null = null;
+  if (analysis.yearsExperience) {
+    const yearsMatch = analysis.yearsExperience.match(/(\d+)/);
+    if (yearsMatch && parseInt(yearsMatch[1], 10) <= 15) {
+      validatedExperience = analysis.yearsExperience;
+    }
+  }
+
+  // Extract software and programming skills directly from dictionaries (comprehensive)
+  const software: string[] = [];
+  for (const [soft, pattern] of Object.entries(softwareKeywords)) {
+    if (pattern.test(job.description)) {
+      software.push(soft);
+    }
+    pattern.lastIndex = 0;
+  }
+
+  const programmingSkills: string[] = [];
+  for (const [skill, pattern] of Object.entries(programmingKeywords)) {
+    if (pattern.test(job.description)) {
+      programmingSkills.push(skill);
+    }
+    pattern.lastIndex = 0;
+  }
+
+  const source = extractSourceDomain(job.link);
 
   const sections: string[] = [
     "🆕 NEW JOB POSTING",
@@ -61,22 +126,26 @@ export function formatJobMessage(job: JobItem): string {
     `🏢 Company: ${details.company}`,
   ];
 
-  if (analysis.companyType !== "Unknown") {
-    sections.push(`🏦 Industry: ${analysis.companyType}`);
+  if (metadata.industry && metadata.industry !== 'Other') {
+    sections.push(`🏦 Industry: ${metadata.industry}`);
   }
 
-  sections.push("", `📍 Location: ${details.location}`);
+  sections.push(`📈 Seniority: ${metadata.seniority}`);
 
-  if (analysis.jobType !== "General Finance") {
+  sections.push("", `📍 Location: ${locationDisplay}`);
+  if (locationData.country) sections.push(`🌍 Country: ${locationData.country}`);
+  if (locationData.city) sections.push(`🏙️ City: ${locationData.city}`);
+
+  if (analysis.jobType !== "General") {
     sections.push(`💼 Role Type: ${analysis.jobType}`);
   }
 
-  if (analysis.yearsExperience) {
-    sections.push(`📊 Experience: ${analysis.yearsExperience}`);
+  if (validatedExperience) {
+    sections.push(`📊 Experience: ${validatedExperience}`);
   }
 
-  if (analysis.certifications.length > 0) {
-    sections.push(`🎓 Certifications: ${analysis.certifications.join(', ')}`);
+  if (metadata.certificates.length > 0) {
+    sections.push(`🎓 Certifications: ${metadata.certificates.join(', ')}`);
   }
 
   if (analysis.academicDegrees.length > 0) {
@@ -90,12 +159,12 @@ export function formatJobMessage(job: JobItem): string {
     });
   }
 
-  if (analysis.programmingSkills.length > 0) {
-    sections.push(`💻 Programming: ${analysis.programmingSkills.join(', ')}`);
+  if (programmingSkills.length > 0) {
+    sections.push(`💻 Programming: ${programmingSkills.join(', ')}`);
   }
 
-  if (analysis.software.length > 0) {
-    sections.push(`🖥️ Software: ${analysis.software.slice(0, 5).join(', ')}`);
+  if (software.length > 0) {
+    sections.push(`🖥️ Software: ${software.slice(0, 5).join(', ')}`);
   }
 
   // Generate tracking URL with job metadata
@@ -103,14 +172,15 @@ export function formatJobMessage(job: JobItem): string {
     jobUrl: job.link,
     title: details.position,
     company: details.company,
-    location: details.location,
+    location: locationDisplay,
     postedDate: job.pubDate,
-    roleType: analysis.jobType !== "General Finance" ? analysis.jobType : undefined,
-    industry: analysis.companyType !== "Unknown" ? analysis.companyType : undefined,
+    roleType: analysis.jobType !== "General" ? analysis.jobType : undefined,
+    industry: metadata.industry !== 'Other' ? metadata.industry : undefined,
   });
 
   sections.push(
     "",
+    `🌐 Source: ${source}`,
     `⏰ Posted: ${timeAgo}`,
     `📅 ${formatDate(postDate)}`,
     "",
