@@ -48,6 +48,31 @@ export async function sendTelegramMessage(message: string): Promise<void> {
 }
 
 /**
+ * Sends a message to a specific Telegram bot/channel (arbitrary credentials)
+ */
+export async function sendTelegramMessageTo(
+  botToken: string,
+  chatId: string,
+  message: string
+): Promise<void> {
+  const url = `https://api.telegram.org/bot${botToken}/sendMessage`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text: message, parse_mode: "HTML" }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new TelegramError(
+      errorData.description || `Failed to send message: ${response.statusText}`,
+      response.status
+    );
+  }
+}
+
+/**
  * Rate-limited message sender
  */
 export async function sendMessagesWithRateLimit(
@@ -68,6 +93,35 @@ export async function sendMessagesWithRateLimit(
       }
     } catch (error) {
       console.error(`Failed to send message ${i + 1}:`, error);
+      failed++;
+    }
+  }
+
+  return { sent, failed };
+}
+
+/**
+ * Rate-limited message sender to an arbitrary bot/channel
+ */
+export async function sendMessagesWithRateLimitTo(
+  botToken: string,
+  chatId: string,
+  messages: string[],
+  delayMs: number = 2000
+): Promise<{ sent: number; failed: number }> {
+  let sent = 0;
+  let failed = 0;
+
+  for (let i = 0; i < messages.length; i++) {
+    try {
+      await sendTelegramMessageTo(botToken, chatId, messages[i]);
+      sent++;
+
+      if (i < messages.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, delayMs));
+      }
+    } catch (error) {
+      console.error(`Failed to send GOAT message ${i + 1}:`, error);
       failed++;
     }
   }

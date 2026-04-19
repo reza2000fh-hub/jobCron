@@ -16,6 +16,10 @@ export const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 export const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 export const CRON_SECRET = process.env.CRON_SECRET;
 
+// GOAT channel — receives only top-tier Corporate/Quant/PE/IB/Data jobs at Entry/Mid level
+export const GOAT_TELEGRAM_BOT_TOKEN = process.env.GOAT_TELEGRAM_BOT_TOKEN;
+export const GOAT_TELEGRAM_CHAT_ID = process.env.GOAT_TELEGRAM_CHAT_ID;
+
 export const RATE_LIMIT_DELAY_MS = 2000; // Delay between Telegram messages
 
 // Tracking configuration

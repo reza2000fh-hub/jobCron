@@ -1,7 +1,7 @@
 import { CronJobResult, JobItem } from "@/types/job";
 import { parseRSSFeeds, filterRecentJobs } from "./rss-parser";
 import { formatJobMessage } from "./job-formatter";
-import { sendMessagesWithRateLimit } from "./telegram";
+import { sendMessagesWithRateLimit, sendMessagesWithRateLimitTo } from "./telegram";
 import { logger } from "./logger";
 import { dailyJobCache } from "./daily-cache";
 import { UrlCache } from "./url-cache";
@@ -9,8 +9,55 @@ import {
   RSS_FEED_URLS,
   CHECK_INTERVAL_MINUTES,
   RATE_LIMIT_DELAY_MS,
+  GOAT_TELEGRAM_BOT_TOKEN,
+  GOAT_TELEGRAM_CHAT_ID,
 } from "@/config/constants";
 import { LocationExtractor } from "./location-extractor";
+import { JobMetadataExtractor } from "./job-metadata-extractor";
+import { RoleTypeExtractor } from "./role-type-extractor";
+import { extractJobDetails } from "./job-analyzer";
+
+// Categories that qualify a job for the GOAT channel
+const GOAT_CATEGORIES = new Set([
+  "Corporate Finance & Accounting",
+  "Quantitative Finance",
+  "Private Equity & Venture Capital",
+  "Investment Banking",
+  "Data & Analytics",
+  "Asset & Portfolio Management",
+]);
+
+// Seniority levels that qualify for the GOAT channel
+const GOAT_SENIORITY = new Set(["Mid", "Entry"]);
+
+/**
+ * Returns true if the job meets the GOAT channel criteria:
+ * category in GOAT_CATEGORIES AND seniority in GOAT_SENIORITY
+ */
+function isGoatEligible(job: JobItem): boolean {
+  const details = extractJobDetails(job.title);
+  const company = details.company !== "N/A" ? details.company : (job.company || "");
+
+  const metadata = JobMetadataExtractor.extractAllMetadata({
+    title: details.position,
+    company,
+    description: job.description,
+    url: job.link,
+  });
+
+  if (!GOAT_SENIORITY.has(metadata.seniority)) {
+    return false;
+  }
+
+  const roleTypeMatch = RoleTypeExtractor.extractRoleType(
+    details.position,
+    metadata.keywords,
+    job.description,
+    metadata.industry,
+  );
+
+  return roleTypeMatch !== null && GOAT_CATEGORIES.has(roleTypeMatch.category);
+}
 
 // Feed URL that should only send Europe and Canada jobs
 const EUROPE_CANADA_ONLY_FEED = "https://rss.app/feeds/cbDOTKxD2MnLmSzW.xml";
@@ -218,10 +265,14 @@ export async function checkAndSendJobs(): Promise<CronJobResult> {
       };
     }
 
-    // Format all messages
-    const messages = newJobs.map((job) => formatJobMessage(job));
+    // Format messages and pre-compute GOAT eligibility for each job
+    const jobMessages = newJobs.map((job) => ({
+      message: formatJobMessage(job),
+      isGoat: isGoatEligible(job),
+    }));
+    const messages = jobMessages.map((jm) => jm.message);
 
-    // Send messages with rate limiting
+    // Send messages with rate limiting to main channel
     const { sent, failed } = await sendMessagesWithRateLimit(
       messages,
       RATE_LIMIT_DELAY_MS,
@@ -249,6 +300,27 @@ export async function checkAndSendJobs(): Promise<CronJobResult> {
       logger.warn(
         `${failed} jobs failed to send and will be retried in next run`,
       );
+    }
+
+    // GOAT channel: send qualifying jobs from the successfully sent batch
+    if (sent > 0 && GOAT_TELEGRAM_BOT_TOKEN && GOAT_TELEGRAM_CHAT_ID) {
+      const goatMessages = jobMessages
+        .slice(0, sent)
+        .filter((jm) => jm.isGoat)
+        .map((jm) => jm.message);
+
+      if (goatMessages.length > 0) {
+        logger.info(`Sending ${goatMessages.length} GOAT-eligible jobs to GOAT channel`);
+        const goatResult = await sendMessagesWithRateLimitTo(
+          GOAT_TELEGRAM_BOT_TOKEN,
+          GOAT_TELEGRAM_CHAT_ID,
+          goatMessages,
+          RATE_LIMIT_DELAY_MS,
+        );
+        logger.info(`GOAT channel: ${goatResult.sent} sent, ${goatResult.failed} failed`);
+      } else {
+        logger.info(`No GOAT-eligible jobs in this batch`);
+      }
     }
 
     logger.info(`Job check completed: ${sent} sent, ${failed} failed`);
