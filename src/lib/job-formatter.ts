@@ -3,6 +3,7 @@ import { extractJobDetails, analyzeJobDescription } from "./job-analyzer";
 import { createTrackingUrl } from "./tracking-url";
 import { JobMetadataExtractor } from "./job-metadata-extractor";
 import { LocationExtractor } from "./location-extractor";
+import { RoleTypeExtractor } from "./role-type-extractor";
 import { softwareKeywords } from "./dictionaries/software";
 import { programmingKeywords } from "./dictionaries/programming-languages";
 
@@ -86,8 +87,16 @@ export function formatJobMessage(job: JobItem): string {
   );
   const locationDisplay = rawLocation || LocationExtractor.formatLocation(locationData) || 'N/A';
 
-  // Experience, key skills, academic degrees, and role type from job analyzer
+  // Experience, key skills, and academic degrees from job analyzer
   const analysis = analyzeJobDescription(job.description);
+
+  // Role type and category using the same comprehensive extractor as stats
+  const roleTypeMatch = RoleTypeExtractor.extractRoleType(
+    details.position,
+    metadata.keywords,
+    job.description,
+    metadata.industry,
+  );
 
   // Validate yearsExperience — discard unrealistically large values (>15 years)
   let validatedExperience: string | null = null;
@@ -136,8 +145,11 @@ export function formatJobMessage(job: JobItem): string {
   if (locationData.country) sections.push(`🌍 Country: ${locationData.country}`);
   if (locationData.city) sections.push(`🏙️ City: ${locationData.city}`);
 
-  if (analysis.jobType !== "General") {
-    sections.push(`💼 Role Type: ${analysis.jobType}`);
+  if (roleTypeMatch?.category) {
+    sections.push(`🗂️ Category: ${roleTypeMatch.category}`);
+  }
+  if (roleTypeMatch?.roleType) {
+    sections.push(`💼 Role Type: ${roleTypeMatch.roleType}`);
   }
 
   if (validatedExperience) {
@@ -174,7 +186,7 @@ export function formatJobMessage(job: JobItem): string {
     company: details.company,
     location: locationDisplay,
     postedDate: job.pubDate,
-    roleType: analysis.jobType !== "General" ? analysis.jobType : undefined,
+    roleType: roleTypeMatch?.roleType ?? undefined,
     industry: metadata.industry !== 'Other' ? metadata.industry : undefined,
   });
 
