@@ -27,6 +27,9 @@ const GOAT_CATEGORIES = new Set([
   "Asset & Portfolio Management",
 ]);
 
+// Companies blacklisted from the GOAT channel (case-insensitive substring match)
+const GOAT_COMPANY_BLACKLIST = ["targetjobs", "greenwich"];
+
 // Seniority levels that qualify for the GOAT channel
 const GOAT_SENIORITY = new Set(["Mid", "Entry"]);
 // Industry levels that qualify for the GOAT channel
@@ -53,6 +56,12 @@ function isUKLocation(job: JobItem): boolean {
 function isGoatEligible(job: JobItem): boolean {
   // UK/London location is mandatory for all GOAT posts
   if (!isUKLocation(job)) {
+    return false;
+  }
+
+  // Reject blacklisted companies
+  const companyLower = (job.company || "").toLowerCase();
+  if (GOAT_COMPANY_BLACKLIST.some((name) => companyLower.includes(name))) {
     return false;
   }
 
