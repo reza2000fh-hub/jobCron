@@ -29,12 +29,33 @@ const GOAT_CATEGORIES = new Set([
 
 // Seniority levels that qualify for the GOAT channel
 const GOAT_SENIORITY = new Set(["Mid", "Entry"]);
+// Industry levels that qualify for the GOAT channel
+const GOAT_INDUSTRY = new Set(["Finance"]);
+
+// UK location terms required for all GOAT channel posts
+const GOAT_UK_TERMS = ["united kingdom", "london", "uk", "england", "scotland", "wales"];
+
+/**
+ * Returns true if the job location contains UK/London keywords.
+ * Checks job.location, job.title, and job.description for UK terms.
+ */
+function isUKLocation(job: JobItem): boolean {
+  const searchText = `${job.location || ""} ${job.title} ${job.description}`.toLowerCase();
+  return GOAT_UK_TERMS.some((term) => searchText.includes(term));
+}
 
 /**
  * Returns true if the job meets the GOAT channel criteria:
- * category in GOAT_CATEGORIES AND seniority in GOAT_SENIORITY
+ * - MUST be UK/London location (always required)
+ * - If CFA certification is present: location check is sufficient
+ * - Otherwise: seniority in GOAT_SENIORITY AND industry in GOAT_INDUSTRY AND category in GOAT_CATEGORIES
  */
 function isGoatEligible(job: JobItem): boolean {
+  // UK/London location is mandatory for all GOAT posts
+  if (!isUKLocation(job)) {
+    return false;
+  }
+
   const details = extractJobDetails(job.title);
   const company = details.company !== "N/A" ? details.company : (job.company || "");
 
@@ -45,7 +66,19 @@ function isGoatEligible(job: JobItem): boolean {
     url: job.link,
   });
 
+  // CFA/CIMA bypass: skip industry/category checks if either certification is detected
+  const hasBypassCert = metadata.certificates.some((cert) => {
+    const c = cert.toLowerCase();
+    return c.includes("cfa") || c.includes("cima");
+  });
+  if (hasBypassCert) {
+    return true;
+  }
+
   if (!GOAT_SENIORITY.has(metadata.seniority)) {
+    return false;
+  }
+  if (!GOAT_INDUSTRY.has(metadata.industry)) {
     return false;
   }
 

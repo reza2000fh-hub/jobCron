@@ -117,6 +117,7 @@ export class JobMetadataExtractor {
       }
     }
 
+
     const titleLower = title.toLowerCase();
     const scores: Record<string, number> = {};
 
