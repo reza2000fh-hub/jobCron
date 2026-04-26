@@ -180,9 +180,14 @@ export function formatJobMessage(job: JobItem): string {
   }
 
   // For Indeed jobs, rewrite the tracking param so the direct link works
-  const jobUrl = job.link.toLowerCase().includes('indeed')
+  let jobUrl = job.link.toLowerCase().includes('indeed')
     ? job.link.replace('from=social_other', 'from=jobsearch-empty-whatwhere')
     : job.link;
+
+  // Strip HTML-encoded ampersands from Indeed URLs
+  if (jobUrl.toLowerCase().includes('indeed')) {
+    jobUrl = jobUrl.replace(/amp;/g, '');
+  }
 
   // Generate tracking URL with job metadata
   const trackingUrl = createTrackingUrl({
