@@ -104,7 +104,6 @@ interface StatsData {
     lastUpdated: string;
     jobCount: number;
     statistics: MonthlyStatistics;
-    jobs: JobStatistic[];
   };
   summary: {
     totalJobsAllTime: number;
@@ -303,110 +302,54 @@ export default function StatsPage() {
     return normalized;
   };
 
-  // Get available filter options from all jobs with counts (MEMOIZED for performance)
+  // Get available filter options from pre-computed statistics (MEMOIZED for performance)
+  // Uses the active statistics object (aggregated or current month) so filter options
+  // always match the data being viewed — no need to iterate over job objects.
   const availableFilterOptions = useMemo(() => {
-    if (!statsData) {
-      return {
-        industry: [],
-        certificate: [],
-        seniority: [],
-        location: [],
-        company: [],
-        keyword: [],
-        country: [],
-        city: [],
-        software: [],
-        programmingSkill: [],
-        yearsExperience: [],
-        academicDegree: [],
-        region: [],
-        roleType: [],
-        roleCategory: [],
-      };
-    }
-
-    const counts: Record<string, Record<string, number>> = {
-      industry: {},
-      certificate: {},
-      seniority: {},
-      location: {},
-      company: {},
-      keyword: {},
-      country: {},
-      city: {},
-      software: {},
-      programmingSkill: {},
-      yearsExperience: {},
-      academicDegree: {},
-      region: {},
-      roleType: {},
-      roleCategory: {},
+    const empty: Record<keyof ActiveFilters, Array<{ value: string; count: number }>> = {
+      industry: [], certificate: [], seniority: [], location: [], company: [],
+      keyword: [], country: [], city: [], software: [], programmingSkill: [],
+      yearsExperience: [], academicDegree: [], region: [], roleType: [], roleCategory: [],
     };
+    if (!statsData) return empty;
 
-    // Count occurrences
-    statsData.currentMonth.jobs.forEach(job => {
-      if (job.industry) counts.industry[job.industry] = (counts.industry[job.industry] || 0) + 1;
-      if (job.seniority) counts.seniority[job.seniority] = (counts.seniority[job.seniority] || 0) + 1;
-      if (job.location) counts.location[job.location] = (counts.location[job.location] || 0) + 1;
-      if (job.company) counts.company[job.company] = (counts.company[job.company] || 0) + 1;
-      if (job.country) counts.country[job.country] = (counts.country[job.country] || 0) + 1;
-      if (job.region) counts.region[job.region] = (counts.region[job.region] || 0) + 1;
-      if (job.yearsExperience) counts.yearsExperience[job.yearsExperience] = (counts.yearsExperience[job.yearsExperience] || 0) + 1;
-      if (job.roleType) counts.roleType[job.roleType] = (counts.roleType[job.roleType] || 0) + 1;
-      if (job.roleCategory) counts.roleCategory[job.roleCategory] = (counts.roleCategory[job.roleCategory] || 0) + 1;
+    const stats = useAggregated && statsData.aggregated
+      ? statsData.aggregated.statistics
+      : statsData.currentMonth.statistics;
+    if (!stats) return empty;
 
-      const normCity = normalizeCity(job.city);
-      if (normCity) counts.city[normCity] = (counts.city[normCity] || 0) + 1;
-
-      job.certificates?.forEach(cert => {
-        counts.certificate[cert] = (counts.certificate[cert] || 0) + 1;
-      });
-      job.keywords?.forEach(kw => {
-        counts.keyword[kw] = (counts.keyword[kw] || 0) + 1;
-      });
-      job.software?.forEach(sw => {
-        counts.software[sw] = (counts.software[sw] || 0) + 1;
-      });
-      job.programmingSkills?.forEach(skill => {
-        counts.programmingSkill[skill] = (counts.programmingSkill[skill] || 0) + 1;
-      });
-      job.academicDegrees?.forEach(deg => {
-        counts.academicDegree[deg] = (counts.academicDegree[deg] || 0) + 1;
-      });
-    });
-
-    // Convert to sorted arrays with counts
-    const result: Record<keyof ActiveFilters, Array<{ value: string; count: number }>> = {
-      industry: [],
-      certificate: [],
-      seniority: [],
-      location: [],
-      company: [],
-      keyword: [],
-      country: [],
-      city: [],
-      software: [],
-      programmingSkill: [],
-      yearsExperience: [],
-      academicDegree: [],
-      region: [],
-      roleType: [],
-      roleCategory: [],
-    };
-
-    (Object.keys(counts) as Array<keyof ActiveFilters>).forEach(key => {
-      result[key] = Object.entries(counts[key])
+    const toSortedArray = (record: Record<string, number> | undefined): Array<{ value: string; count: number }> =>
+      Object.entries(record || {})
         .map(([value, count]) => ({ value, count }))
-        .sort((a, b) => b.count - a.count); // Sort by count descending
-    });
+        .sort((a, b) => b.count - a.count);
 
-    return result;
-  }, [statsData]); // Only recalculate when statsData changes
+    return {
+      industry: toSortedArray(stats.byIndustry),
+      certificate: toSortedArray(stats.byCertificate),
+      seniority: toSortedArray(stats.bySeniority),
+      location: toSortedArray(stats.byLocation),
+      company: toSortedArray(stats.byCompany),
+      keyword: toSortedArray(stats.byKeyword),
+      country: toSortedArray(stats.byCountry),
+      city: toSortedArray(stats.byCity),
+      software: toSortedArray(stats.bySoftware),
+      programmingSkill: toSortedArray(stats.byProgrammingSkill),
+      yearsExperience: toSortedArray(stats.byYearsExperience),
+      academicDegree: toSortedArray(stats.byAcademicDegree),
+      region: toSortedArray(stats.byRegion),
+      roleType: toSortedArray(stats.byRoleType),
+      roleCategory: toSortedArray(stats.byRoleCategory),
+    };
+  }, [statsData, useAggregated]);
 
   // Filter jobs based on active filters and text search (MEMOIZED for performance)
+  // jobs are no longer sent by the load endpoint — filteredJobs is empty unless
+  // a future paginated job-listing endpoint populates statsData.currentMonth.jobs.
   const filteredJobs = useMemo(() => {
     if (!statsData) return [];
-    return statsData.currentMonth.jobs.filter(job => {
+    const jobs = (statsData.currentMonth as any).jobs as JobStatistic[] | undefined;
+    if (!jobs?.length) return [];
+    return jobs.filter(job => {
       // Text search filter (searches title, company, description, keywords)
       if (debouncedTextSearch) {
         const searchLower = debouncedTextSearch.toLowerCase();
